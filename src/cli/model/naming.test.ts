@@ -86,6 +86,30 @@ describe("planOperation", () => {
 });
 
 describe("planOperations collision handling", () => {
+	test("preserves distinct Jira priority operation intents", () => {
+		const ops: NormalizedOperation[] = [
+			{
+				key: "GET /rest/api/3/priority",
+				method: "GET",
+				path: "/rest/api/3/priority",
+				operationId: "getPriorities",
+				tags: ["Issue priorities"],
+				parameters: [],
+			},
+			{
+				key: "GET /rest/api/3/priority/search",
+				method: "GET",
+				path: "/rest/api/3/priority/search",
+				operationId: "searchPriorities",
+				tags: ["Issue priorities"],
+				parameters: [],
+			},
+		];
+
+		const planned = planOperations(ops);
+		expect(planned.map((op) => op.action)).toEqual(["list", "search"]);
+	});
+
 	test("disambiguates colliding creates with meaningful names", () => {
 		const ops: NormalizedOperation[] = [
 			{
