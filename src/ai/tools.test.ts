@@ -38,12 +38,12 @@ describe("specli tool", () => {
 		});
 
 		const result = (await tool.execute?.(
-			{ command: "help", resource: "pets", action: "get" },
+			{ command: "help", resource: "pet", action: "get-pet-by-id" },
 			mockOptions,
 		)) as { action: string };
 
 		expect(result).toHaveProperty("action");
-		expect(result.action).toBe("get");
+		expect(result.action).toBe("get-pet-by-id");
 	});
 
 	test("help command with missing resource returns error", async () => {
@@ -64,7 +64,11 @@ describe("specli tool", () => {
 		});
 
 		const result = (await tool.execute?.(
-			{ command: "exec", resource: "pets", action: "get" },
+			{
+				command: "exec",
+				resource: "pet",
+				action: "get-pet-by-id",
+			},
 			mockOptions,
 		)) as { error: string };
 

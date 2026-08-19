@@ -53,7 +53,6 @@ describe("deriveCapabilities", () => {
 							method: "POST",
 							path: "/contacts",
 							tags: [],
-							style: "rest",
 							positionals: [],
 							flags: [],
 							params: [],

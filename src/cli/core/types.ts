@@ -42,6 +42,7 @@ export type NormalizedOperation = {
 	method: string;
 	path: string;
 	operationId?: string;
+	successResponseCardinality?: "collection";
 	tags: string[];
 	summary?: string;
 	description?: string;

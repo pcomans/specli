@@ -18,7 +18,6 @@ function makeAction(partial?: Partial<CommandAction>): CommandAction {
 		method: "POST",
 		path: "/contacts",
 		tags: [],
-		style: "rest",
 		positionals: [],
 		flags: [],
 		params: [],
@@ -241,7 +240,6 @@ describe("buildRequest (query parameters)", () => {
 				method: "GET",
 				path: "/contacts",
 				tags: [],
-				style: "rest",
 				positionals: [],
 				flags: [
 					{
@@ -316,7 +314,6 @@ describe("buildRequest (query parameters)", () => {
 				method: "GET",
 				path: "/contacts",
 				tags: [],
-				style: "rest",
 				positionals: [],
 				flags: [
 					{
@@ -393,7 +390,6 @@ describe("buildRequest (curl masking)", () => {
 				method: "GET",
 				path: "/contacts",
 				tags: [],
-				style: "rest",
 				positionals: [],
 				flags: [],
 				params: [],
@@ -443,7 +439,6 @@ describe("buildRequest (curl masking)", () => {
 				method: "GET",
 				path: "/contacts",
 				tags: [],
-				style: "rest",
 				positionals: [],
 				flags: [],
 				params: [],

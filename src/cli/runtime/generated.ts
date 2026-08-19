@@ -1,5 +1,6 @@
 import { Command } from "commander";
 
+import { ROOT_COMMAND_NAMES } from "../core/root-command-names.js";
 import type { CommandAction, CommandModel } from "../model/command-model.js";
 import type { AuthScheme } from "../parse/auth-schemes.js";
 import type { ServerInfo } from "../parse/servers.js";
@@ -101,7 +102,7 @@ function formatCustomHelp(
 	lines.push("  --json\n      Output response as JSON");
 	lines.push("  --server <url>\n      Override the API server URL");
 	lines.push(
-		"  --bearer-token <token>\n      Provide auth token (or use 'login' command)",
+		`  --bearer-token <token>\n      Provide auth token (or use '${ROOT_COMMAND_NAMES.login}' command)`,
 	);
 	lines.push("  -h, --help\n      Show this help message");
 	lines.push("");

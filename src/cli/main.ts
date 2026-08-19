@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Command, Help } from "commander";
 
+import { ROOT_COMMAND_NAMES } from "./core/root-command-names.js";
 import { getArgValue, hasAnyArg } from "./runtime/argv.js";
 import { collectRepeatable } from "./runtime/collect.js";
 
@@ -67,7 +68,8 @@ export async function main(argv: string[], options: MainOptions = {}) {
 		.option("--password <password>", "Basic auth password")
 		.option("--api-key <key>", "API key value")
 		.option("--json", "Output as JSON")
-		.showHelpAfterError();
+		.showHelpAfterError()
+		.helpCommand(`${ROOT_COMMAND_NAMES.help} [command]`);
 
 	// If user asks for help and we have no embedded spec and no --spec, show minimal help.
 	const spec = getArgValue(argv, "--spec");
@@ -90,7 +92,7 @@ export async function main(argv: string[], options: MainOptions = {}) {
 	const defaultProfileName = "default";
 
 	program
-		.command("login [token]")
+		.command(`${ROOT_COMMAND_NAMES.login} [token]`)
 		.description("Store a bearer token for authentication")
 		.action(async (tokenArg: string | undefined, _opts, command) => {
 			const globals = command.optsWithGlobals() as { json?: boolean };
@@ -121,8 +123,7 @@ export async function main(argv: string[], options: MainOptions = {}) {
 			if (!token) {
 				const result: CommandResult = {
 					type: "error",
-					message:
-						"No token provided. Usage: login <token> or echo $TOKEN | login",
+					message: `No token provided. Usage: ${ROOT_COMMAND_NAMES.login} <token> or echo $TOKEN | ${ROOT_COMMAND_NAMES.login}`,
 				};
 				writeResult(result, { format: globals.json ? "json" : "text" });
 				return;
@@ -148,7 +149,7 @@ export async function main(argv: string[], options: MainOptions = {}) {
 		});
 
 	program
-		.command("logout")
+		.command(ROOT_COMMAND_NAMES.logout)
 		.description("Clear stored authentication token")
 		.action(async (_opts, command) => {
 			const globals = command.optsWithGlobals() as { json?: boolean };
@@ -164,7 +165,7 @@ export async function main(argv: string[], options: MainOptions = {}) {
 		});
 
 	program
-		.command("whoami")
+		.command(ROOT_COMMAND_NAMES.whoami)
 		.description("Show current authentication status")
 		.action(async (_opts, command) => {
 			const globals = command.optsWithGlobals() as { json?: boolean };
@@ -192,7 +193,7 @@ export async function main(argv: string[], options: MainOptions = {}) {
 		});
 
 	program
-		.command("__schema")
+		.command(ROOT_COMMAND_NAMES.schema)
 		.description("Print indexed operations")
 		.option(
 			"--commands",
@@ -277,16 +278,16 @@ export async function main(argv: string[], options: MainOptions = {}) {
 
 			// Non-OpenAPI commands (built-ins)
 			lines.push("Global Commands:");
-			const globalCommands = ["login", "logout", "whoami", "__schema", "help"];
+			const globalCommands = Object.values(ROOT_COMMAND_NAMES);
 			const maxCmdLen = Math.max(...globalCommands.map((c) => c.length));
 			for (const cmdName of globalCommands) {
 				const c = program.commands.find((c) => c.name() === cmdName);
 				if (!c) continue;
 				const term =
-					cmdName === "login"
-						? "login [token]"
-						: cmdName === "help"
-							? "help [command]"
+					cmdName === ROOT_COMMAND_NAMES.login
+						? `${ROOT_COMMAND_NAMES.login} [token]`
+						: cmdName === ROOT_COMMAND_NAMES.help
+							? `${ROOT_COMMAND_NAMES.help} [command]`
 							: cmdName;
 				const desc = c.description();
 				const pad = " ".repeat(Math.max(1, maxCmdLen - cmdName.length + 2));
@@ -314,7 +315,7 @@ export async function main(argv: string[], options: MainOptions = {}) {
 			lines.push("");
 
 			lines.push("Agent workflow:");
-			lines.push(`  1) ${name} __schema`);
+			lines.push(`  1) ${name} ${ROOT_COMMAND_NAMES.schema}`);
 			lines.push(`  2) ${name} <resource> --help`);
 			lines.push(`  3) ${name} <resource> <action> --help`);
 			lines.push(`  4) ${name} <resource> <action> --curl`);

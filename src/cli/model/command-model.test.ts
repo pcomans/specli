@@ -14,10 +14,8 @@ describe("buildCommandModel", () => {
 				parameters: [],
 				resource: "contacts",
 				action: "list",
-				canonicalAction: "list",
 				pathArgs: [],
 				rawPathArgs: [],
-				style: "rest",
 			},
 			{
 				key: "GET /contacts/{id}",
@@ -27,10 +25,8 @@ describe("buildCommandModel", () => {
 				parameters: [],
 				resource: "contacts",
 				action: "get",
-				canonicalAction: "get",
 				pathArgs: ["id"],
 				rawPathArgs: ["id"],
-				style: "rest",
 			},
 		];
 

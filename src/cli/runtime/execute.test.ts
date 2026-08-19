@@ -16,7 +16,6 @@ function makeAction(partial?: Partial<CommandAction>): CommandAction {
 		method: "GET",
 		path: "/users/{id}",
 		tags: [],
-		style: "rest",
 		positionals: [{ name: "id", required: true, type: "string" }],
 		flags: [],
 		params: [],

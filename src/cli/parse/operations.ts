@@ -33,6 +33,10 @@ type RawRequestBody = {
 	content?: Record<string, { schema?: unknown } | undefined>;
 };
 
+type RawResponse = {
+	content?: Record<string, { schema?: unknown } | undefined>;
+};
+
 type RawOperation = {
 	operationId?: string;
 	tags?: string[];
@@ -42,6 +46,7 @@ type RawOperation = {
 	security?: OpenApiDoc["security"];
 	parameters?: RawParameter[];
 	requestBody?: RawRequestBody;
+	responses?: Record<string, RawResponse | undefined>;
 };
 
 type RawPathItem = {
@@ -112,6 +117,61 @@ function normalizeRequestBody(
 	};
 }
 
+const SUCCESS_RESPONSE_KEY = /^2(?:[0-9]{2}|XX)$/;
+const COMPOSITION_KEYWORDS = ["oneOf", "anyOf", "allOf", "not"] as const;
+
+function isDirectArraySchema(schema: unknown): boolean {
+	if (!schema || typeof schema !== "object" || Array.isArray(schema)) {
+		return false;
+	}
+
+	const record = schema as Record<string, unknown>;
+	const directTypeIsArray =
+		record.type === "array" ||
+		(Array.isArray(record.type) &&
+			record.type.length === 1 &&
+			record.type[0] === "array");
+	if (!directTypeIsArray || record.nullable === true) return false;
+
+	return !COMPOSITION_KEYWORDS.some((keyword) => keyword in record);
+}
+
+function getSuccessResponseCardinality(
+	responses: RawOperation["responses"],
+): NormalizedOperation["successResponseCardinality"] {
+	let schemaCount = 0;
+
+	for (const [status, response] of Object.entries(responses ?? {})) {
+		if (!SUCCESS_RESPONSE_KEY.test(status)) continue;
+		if (!response || typeof response !== "object" || Array.isArray(response)) {
+			return undefined;
+		}
+		if (response.content === undefined) continue;
+		if (
+			!response.content ||
+			typeof response.content !== "object" ||
+			Array.isArray(response.content)
+		) {
+			return undefined;
+		}
+
+		for (const mediaType of Object.values(response.content)) {
+			if (
+				!mediaType ||
+				typeof mediaType !== "object" ||
+				Array.isArray(mediaType) ||
+				mediaType.schema === undefined
+			) {
+				return undefined;
+			}
+			schemaCount++;
+			if (!isDirectArraySchema(mediaType.schema)) return undefined;
+		}
+	}
+
+	return schemaCount > 0 ? "collection" : undefined;
+}
+
 export function indexOperations(doc: OpenApiDoc): NormalizedOperation[] {
 	const out: NormalizedOperation[] = [];
 	const paths = doc.paths ?? {};
@@ -132,6 +192,7 @@ export function indexOperations(doc: OpenApiDoc): NormalizedOperation[] {
 				method: normalizedMethod,
 				path,
 				operationId: op.operationId,
+				successResponseCardinality: getSuccessResponseCardinality(op.responses),
 				tags: op.tags ?? [],
 				summary: op.summary,
 				description: op.description,

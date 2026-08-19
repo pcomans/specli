@@ -29,7 +29,6 @@ export type CommandAction = {
 	summary?: string;
 	description?: string;
 	deprecated?: boolean;
-	style: PlannedOperation["style"];
 
 	// Derived CLI shape (Phase 1 output; Phase 2 will wire these into commander)
 	positionals: PositionalArg[];
@@ -103,7 +102,6 @@ export function buildCommandModel(
 			summary: op.summary,
 			description: op.description,
 			deprecated: op.deprecated,
-			style: op.style,
 			params,
 			positionals,
 			flags: flags.flags,
