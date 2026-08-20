@@ -1,0 +1,10 @@
+scenario,method,path,tag,operation_id,success_schema,expected_resource,expected_action,reason
+stock-actions,GET,/shops/stock,Shop stock,getStock,array,shop-stock,list,Only a direct-array response changes this authored get to list.
+stock-actions,GET,/shops/stock/search,Shop stock,searchStock,object,shop-stock,search,The authored search action stays distinct from list.
+path-fallbacks,GET,/market-stalls,,,none,market-stalls,list,Specli uses the list fallback for a static final path segment.
+path-fallbacks,GET,/market-stalls/{stallId},,,object,market-stalls,get,Specli uses the get fallback for a final path parameter.
+structured-id,POST,/craft-shops/{shopId}/orders,,orders/create-batch,object,orders,create-batch,The shop path confirms that orders is the resource side.
+authored-modifier,DELETE,/shops/{shopId}/catalog-items,Shop catalog items,deleteAllCatalogItems,none,shop-catalog-items,delete-all,The authored all modifier remains part of the action.
+full-id,POST,/shops/{shopId}/deliveries/{deliveryId},Deliveries,scheduleDeliveryWindow,object,deliveries,schedule-delivery-window,The full ID remains when singular and plural terms do not match.
+action-collision,POST,/general-stores/{storeId}/orders,Store orders,createOrders,object,store-orders,create-orders,A collision expands the first action to its full authored ID.
+action-collision,POST,/seed-shops/{shopId}/orders,Store orders,createStoreOrders,object,store-orders,create-store-orders,A collision expands the second action to its full authored ID.

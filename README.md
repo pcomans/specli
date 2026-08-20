@@ -117,17 +117,30 @@ The compiled binary works standalone:
 ./dist/myapi users get abc123 --json
 ```
 
-## CLI Shape
+## Command names
 
-specli generates commands of the form:
+Specli generates commands in the following form:
 
-```
+```text
 <resource> <action> [...positionals] [options]
 ```
 
-- **resource**: Derived from `tags[0]`, `operationId` prefix, or first path segment
-- **action**: Inferred from HTTP method or `operationId` suffix
-- Name collisions are disambiguated automatically
+OpenAPI doesn't define CLI command names. Specli applies the following naming
+heuristics:
+
+- A useful first tag supplies the resource name.
+- A supported `operationId` pattern supplies an authored action when tag or path
+  evidence confirms how to split it.
+- The final path shape supplies an HTTP method fallback when no useful authored
+  action exists.
+- A nested static leaf or an unambiguous direct-array success response can
+  refine an authored `get` action to `list`.
+- The full authored `operationId` and exact route identity resolve collisions.
+
+See the [command-name examples](docs/command-name-examples.csv) for concise
+input and expected-output mappings. Specli plans rows that share a `scenario`
+as one OpenAPI document. Tests execute those scenarios and register the
+resulting commands.
 
 Use `__schema` to see the command mapping for any spec.
 
