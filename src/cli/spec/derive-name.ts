@@ -8,31 +8,25 @@ const RESERVED_NAMES = [
 ];
 
 /**
- * Derives a clean binary name from an OpenAPI spec.
+ * Derives a clean binary name from an already resolved OpenAPI spec.
  * Priority:
  *   1. info.title (kebab-cased, sanitized)
  *   2. Host from spec URL (if URL provided)
  *   3. Fallback to "specli"
  */
-export async function deriveBinaryName(spec: string): Promise<string> {
-	try {
-		// Load spec to extract title
-		const text = await loadSpecText(spec);
-		const doc = parseSpec(text);
-
-		const title = doc?.info?.title;
-		if (title && typeof title === "string") {
-			const name = sanitizeName(title);
-			if (name) return name;
-		}
-	} catch {
-		// Fall through to URL-based derivation
+export function deriveBinaryName(options: {
+	title?: string;
+	source: string;
+}): string {
+	if (typeof options.title === "string" && options.title) {
+		const name = sanitizeName(options.title);
+		if (name) return name;
 	}
 
 	// Try to derive from URL host
-	if (/^https?:\/\//i.test(spec)) {
+	if (/^https?:\/\//i.test(options.source)) {
 		try {
-			const url = new URL(spec);
+			const url = new URL(options.source);
 			const hostParts = url.hostname.split(".");
 			// Use first meaningful segment (skip www, api prefixes)
 			const meaningful = hostParts.find(
@@ -49,33 +43,6 @@ export async function deriveBinaryName(spec: string): Promise<string> {
 
 	// Fallback
 	return "specli";
-}
-
-async function loadSpecText(spec: string): Promise<string> {
-	if (/^https?:\/\//i.test(spec)) {
-		const res = await fetch(spec);
-		if (!res.ok) throw new Error(`Failed to fetch: ${res.status}`);
-		return res.text();
-	}
-	return Bun.file(spec).text();
-}
-
-function parseSpec(text: string): { info?: { title?: string } } | null {
-	try {
-		const trimmed = text.trimStart();
-		if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
-			return JSON.parse(text);
-		}
-		// Use Bun's YAML parser
-		const { YAML } = globalThis.Bun ?? {};
-		if (YAML?.parse) {
-			return YAML.parse(text) as { info?: { title?: string } };
-		}
-		// Fallback: only JSON supported
-		return null;
-	} catch {
-		return null;
-	}
 }
 
 /**
