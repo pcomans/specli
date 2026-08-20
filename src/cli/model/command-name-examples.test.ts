@@ -196,7 +196,7 @@ describe("executable command-name examples", () => {
 		}
 	});
 
-	test("uses direct-array evidence to refine the singleton-shaped stock read", async () => {
+	test("uses array response evidence to refine the singleton-shaped stock read", async () => {
 		const stockRead = readExamples().find(
 			(row) =>
 				row.scenario === "stock-actions" && row.operationId === "getStock",

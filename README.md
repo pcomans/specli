@@ -133,7 +133,7 @@ heuristics:
   evidence confirms how to split it.
 - The final path shape supplies an HTTP method fallback when no useful authored
   action exists.
-- A nested static leaf or an unambiguous direct-array success response can
+- A nested static leaf or a successful response whose schema is an array can
   refine an authored `get` action to `list`.
 - The full authored `operationId` and exact route identity resolve collisions.
 

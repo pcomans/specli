@@ -1,5 +1,5 @@
 scenario,method,path,tag,operation_id,success_schema,expected_resource,expected_action,reason
-stock-actions,GET,/shops/stock,Shop stock,getStock,array,shop-stock,list,Only a direct-array response changes this authored get to list.
+stock-actions,GET,/shops/stock,Shop stock,getStock,array,shop-stock,list,Only an array response changes this authored get to list.
 stock-actions,GET,/shops/stock/search,Shop stock,searchStock,object,shop-stock,search,The authored search action stays distinct from list.
 path-fallbacks,GET,/market-stalls,,,none,market-stalls,list,Specli uses the list fallback for a static final path segment.
 path-fallbacks,GET,/market-stalls/{stallId},,,object,market-stalls,get,Specli uses the get fallback for a final path parameter.
