@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { deriveBinaryName } from "./spec/derive-name.js";
+import { resolveSpecBundle } from "./spec/resolved-bundle.js";
 
 // Resolve the package root directory (at runtime this file is at dist/cli/compile.js)
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -30,23 +31,6 @@ function parseKeyValue(input: string): { key: string; value: string } {
 	const value = input.slice(idx + 1).trim();
 	if (!key) throw new Error(`Invalid --define '${input}', missing key`);
 	return { key, value };
-}
-
-/**
- * Loads the OpenAPI spec from a URL or file path.
- */
-async function loadSpec(spec: string): Promise<string> {
-	if (!spec) throw new Error("Missing spec path/URL");
-
-	if (/^https?:\/\//i.test(spec)) {
-		const res = await fetch(spec);
-		if (!res.ok) {
-			throw new Error(`Failed to fetch spec: ${res.status} ${res.statusText}`);
-		}
-		return await res.text();
-	}
-
-	return await fs.promises.readFile(spec, "utf-8");
 }
 
 /**
@@ -115,17 +99,20 @@ export async function compileCommand(
 	spec: string,
 	options: CompileOptions,
 ): Promise<void> {
-	// Derive name from spec if not provided
-	const name = options.name ?? (await deriveBinaryName(spec));
+	process.stdout.write(`Loading spec: ${spec}\n`);
+	const resolved = await resolveSpecBundle({ spec });
+
+	const name =
+		options.name ??
+		deriveBinaryName({
+			title: resolved.bundled.info?.title,
+			source: spec,
+		});
 	const outfile = options.outfile ?? `./out/${name}`;
 
 	const target = options.target
 		? (options.target as Bun.Build.Target)
 		: (`bun-${process.platform}-${process.arch}` as Bun.Build.Target);
-
-	// Load the spec content
-	process.stdout.write(`Loading spec: ${spec}\n`);
-	const specText = await loadSpec(spec);
 
 	// Get package version
 	const version = getPackageVersion();
@@ -135,7 +122,7 @@ export async function compileCommand(
 	const tempEntrypoint = path.join(tempDir, "entrypoint.ts");
 
 	const entrypointCode = generateEntrypoint({
-		specText,
+		specText: resolved.canonicalText,
 		cliName: name,
 		server: options.server,
 		serverVars: options.serverVar?.join(","),

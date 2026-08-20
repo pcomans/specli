@@ -74,14 +74,28 @@ describe("loadSpec", () => {
 			},
 		};
 
-		const loaded = await loadSpec({
-			spec: "https://petstore3.swagger.io/api/v3/openapi.json",
-			fs: customFs,
-		});
+		const originalFetch = globalThis.fetch;
+		let fetchCount = 0;
+		globalThis.fetch = (async () => {
+			fetchCount += 1;
+			return new Response(minimalSpec, {
+				headers: { "content-type": "application/json" },
+			});
+		}) as unknown as typeof fetch;
 
-		expect(fsCalled).toBe(false);
-		expect(loaded.source).toBe("url");
-		expect(loaded.doc.openapi).toBeDefined();
+		try {
+			const loaded = await loadSpec({
+				spec: "https://spec.example/openapi.json",
+				fs: customFs,
+			});
+
+			expect(fsCalled).toBe(false);
+			expect(fetchCount).toBe(1);
+			expect(loaded.source).toBe("url");
+			expect(loaded.doc.openapi).toBeDefined();
+		} finally {
+			globalThis.fetch = originalFetch;
+		}
 	});
 
 	test("uses embedded spec text over file path", async () => {
@@ -117,6 +131,18 @@ describe("loadSpec", () => {
 				fs: customFs,
 			}),
 		).rejects.toThrow("File not found: /nonexistent.json");
+	});
+
+	test("rejects Swagger 2 at the shared resolution boundary", async () => {
+		await expect(
+			loadSpec({
+				embeddedSpecText: JSON.stringify({
+					swagger: "2.0",
+					info: { title: "Legacy", version: "1.0.0" },
+					paths: {},
+				}),
+			}),
+		).rejects.toThrow("not a valid OpenAPI 3 document");
 	});
 
 	test("generates consistent spec ID from custom fs", async () => {

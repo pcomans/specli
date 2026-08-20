@@ -30,12 +30,12 @@
 		"!**/*.test.*"
 	],
 	"scripts": {
-		"build": "tsc",
-		"prepublishOnly": "rm -rf dist && tsc",
+		"build": "rm -rf dist && tsc -p tsconfig.build.json",
+		"prepublishOnly": "rm -rf dist && tsc -p tsconfig.build.json",
 		"lint": "biome ci",
 		"lint:check": "biome check --write --unsafe",
 		"lint:format": "biome format --write",
-		"typecheck": "tsgo"
+		"typecheck": "tsgo --noEmit"
 	},
 	"dependencies": {
 		"@apidevtools/swagger-parser": "^12.1.0",
