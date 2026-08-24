@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Command } from "commander";
 
+import type { NormalizedOperation } from "../core/types.js";
 import { buildCommandModel } from "../model/command-model.js";
 import { planOperations } from "../model/naming.js";
 import { buildRuntimeContext } from "./context.js";
@@ -30,6 +31,56 @@ describe("addGeneratedCommands collision handling", () => {
 		expect(priorities?.commands.map((command) => command.name())).toEqual([
 			"get-priorities",
 			"search-priorities",
+		]);
+	});
+
+	test("registers a reclaimed video get command", () => {
+		const specId = "videos";
+		const operations = [
+			{ path: "/videos/{video_id}", operationId: "GetVideo" },
+			{
+				path: "/videos/{video_id}/content",
+				operationId: "RetrieveVideoContent",
+			},
+			{
+				path: "/videos/characters/{character_id}",
+				operationId: "GetVideoCharacter",
+			},
+		].map(
+			({ path, operationId }): NormalizedOperation => ({
+				key: `GET ${path}`,
+				method: "GET",
+				path,
+				operationId,
+				tags: ["Videos"],
+				parameters: [],
+			}),
+		);
+		const commands = buildCommandModel(planOperations(operations), { specId });
+		const program = new Command();
+
+		expect(() =>
+			addGeneratedCommands(program, {
+				servers: [],
+				authSchemes: [],
+				commands,
+				specId,
+			}),
+		).not.toThrow();
+
+		expect(
+			commands.resources
+				.find(({ resource }) => resource === "videos")
+				?.actions.find(({ action }) => action === "get"),
+		).toMatchObject({ method: "GET", path: "/videos/{video_id}" });
+
+		const videosCommand = program.commands.find(
+			(command) => command.name() === "videos",
+		);
+		expect(videosCommand?.commands.map((command) => command.name())).toEqual([
+			"get",
+			"get-character",
+			"get-content",
 		]);
 	});
 
