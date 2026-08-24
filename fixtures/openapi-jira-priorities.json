@@ -1,0 +1,23 @@
+{
+	"openapi": "3.0.1",
+	"info": {
+		"title": "Jira priority collision",
+		"version": "1.0.0"
+	},
+	"paths": {
+		"/priority": {
+			"get": {
+				"operationId": "getPriorities",
+				"tags": ["Issue priorities"],
+				"responses": { "200": { "description": "ok" } }
+			}
+		},
+		"/priority/search": {
+			"get": {
+				"operationId": "searchPriorities",
+				"tags": ["Issue priorities"],
+				"responses": { "200": { "description": "ok" } }
+			}
+		}
+	}
+}

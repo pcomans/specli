@@ -24,25 +24,9 @@ function getPathSegments(path: string): string[] {
 }
 
 function getPathArgs(path: string): string[] {
-	const args: string[] = [];
-	const re = /\{([^}]+)\}/g;
-
-	while (true) {
-		const match = re.exec(path);
-		if (!match) break;
-		// biome-ignore lint/style/noNonNullAssertion: unknown
-		args.push(match[1]!);
-	}
-
-	return args;
-}
-
-function pickResourceFromTags(tags: string[]): string | undefined {
-	if (!tags.length) return undefined;
-	const first = tags[0]?.trim();
-	if (!first) return undefined;
-	if (GENERIC_TAGS.has(first.toLowerCase())) return undefined;
-	return first;
+	return Array.from(path.matchAll(/\{([^}]+)\}/g)).flatMap((match) =>
+		match.slice(1),
+	);
 }
 
 function splitOperationId(operationId: string): {
@@ -52,42 +36,20 @@ function splitOperationId(operationId: string): {
 	const trimmed = operationId.trim();
 	if (!trimmed) return {};
 
-	// Prefer dot-notation when present: Contacts.List
-	if (trimmed.includes(".")) {
-		const [prefix, ...rest] = trimmed.split(".");
-		return { prefix, suffix: rest.join(".") };
-	}
-
-	// Try separators: Contacts_List, Contacts__List
-	if (trimmed.includes("__")) {
-		const [prefix, ...rest] = trimmed.split("__");
-		return { prefix, suffix: rest.join("__") };
-	}
-
-	if (trimmed.includes("_")) {
-		const [prefix, ...rest] = trimmed.split("_");
-		return { prefix, suffix: rest.join("_") };
+	for (const separator of [".", "__", "_"]) {
+		if (!trimmed.includes(separator)) continue;
+		const [prefix, ...rest] = trimmed.split(separator);
+		return { prefix, suffix: rest.join(separator) };
 	}
 
 	return { suffix: trimmed };
 }
 
-function inferStyle(op: NormalizedOperation): "rest" | "rpc" {
-	// Path-based RPC convention (common in gRPC-ish HTTP gateways)
-	// - POST /Contacts.List
-	// - POST /Contacts/Service.List
-	if (op.path.includes(".")) return "rpc";
-
-	// operationId dot-notation alone is not enough to call it RPC; many REST APIs
-	// have dotted ids. We treat dotted operationId as a weak signal.
-	if (op.operationId?.includes(".") && op.method === "POST") return "rpc";
-
-	return "rest";
-}
-
 function inferResource(op: NormalizedOperation): string {
-	const tag = pickResourceFromTags(op.tags);
-	if (tag) return pluralize(kebabCase(tag));
+	const tag = op.tags[0]?.trim();
+	if (tag && !GENERIC_TAGS.has(tag.toLowerCase())) {
+		return pluralize(kebabCase(tag));
+	}
 
 	if (op.operationId) {
 		const { prefix } = splitOperationId(op.operationId);
@@ -102,8 +64,7 @@ function inferResource(op: NormalizedOperation): string {
 	let first = segments[0] ?? "api";
 
 	// If first segment is rpc-ish, like Contacts.List, split it.
-	// biome-ignore lint/style/noNonNullAssertion: split always returns at least one element
-	first = first.includes(".") ? first.split(".")[0]! : first;
+	first = first.replace(/\.[\s\S]*$/, "");
 
 	// Singletons like /ping generally shouldn't become `pings`.
 	if (first.toLowerCase() === "ping") return "ping";
@@ -176,11 +137,25 @@ function extractDisambiguator(
 	return name;
 }
 
-/**
- * Derives a disambiguated action name for colliding operations.
- * Tries to create meaningful names like "get-events" instead of "get-get-deployment-events-1".
- */
-function deriveDisambiguatedAction(op: PlannedOperation, idx: number): string {
+const LEGACY_SOURCE_STRENGTH = {
+	numeric: 0,
+	"path-derived": 1,
+	"operation-id-derived": 2,
+	uncontested: 3,
+} as const;
+
+type LegacyNameSource = keyof typeof LEGACY_SOURCE_STRENGTH;
+
+type LegacyPlannedOperation = {
+	op: PlannedOperation;
+	source: LegacyNameSource;
+};
+
+/** Reproduces the legacy candidate and provenance for a primary collision. */
+function deriveLegacyCandidate(
+	op: PlannedOperation,
+	idx: number,
+): { action: string; source: LegacyNameSource } {
 	if (op.operationId) {
 		const disambiguator = extractDisambiguator(
 			op.operationId,
@@ -189,7 +164,10 @@ function deriveDisambiguatedAction(op: PlannedOperation, idx: number): string {
 		);
 		if (disambiguator) {
 			// Use the disambiguator directly as action: "upload-files", "get-events"
-			return `${op.action}-${disambiguator}`;
+			return {
+				action: `${op.action}-${disambiguator}`,
+				source: "operation-id-derived",
+			};
 		}
 	}
 
@@ -202,12 +180,15 @@ function deriveDisambiguatedAction(op: PlannedOperation, idx: number): string {
 		if (!seg || seg.startsWith("{")) continue;
 		const kebabSeg = kebabCase(seg);
 		if (kebabSeg !== op.resource && kebabSeg !== singularResource) {
-			return `${op.action}-${kebabSeg}`;
+			return {
+				action: `${op.action}-${kebabSeg}`,
+				source: "path-derived",
+			};
 		}
 	}
 
 	// Last resort: append numeric suffix
-	return `${op.action}-${idx}`;
+	return { action: `${op.action}-${idx}`, source: "numeric" };
 }
 
 function canonicalizeAction(action: string): string {
@@ -215,10 +196,9 @@ function canonicalizeAction(action: string): string {
 
 	// Common RPC verbs -> REST canonical verbs
 	if (a === "retrieve" || a === "read") return "get";
-	if (a === "list" || a === "search") return "list";
-	if (a === "create") return "create";
-	if (a === "update" || a === "patch") return "update";
-	if (a === "delete" || a === "remove") return "delete";
+	if (a === "search") return "list";
+	if (a === "patch") return "update";
+	if (a === "remove") return "delete";
 
 	return a;
 }
@@ -230,21 +210,14 @@ function inferRestAction(op: NormalizedOperation): string {
 		const { suffix } = splitOperationId(op.operationId);
 		if (suffix) {
 			const fromId = canonicalizeAction(suffix);
-			if (
-				fromId === "get" ||
-				fromId === "list" ||
-				fromId === "create" ||
-				fromId === "update" ||
-				fromId === "delete"
-			) {
+			if (["get", "list", "create", "update", "delete"].includes(fromId)) {
 				return fromId;
 			}
 		}
 	}
 
 	const method = op.method.toUpperCase();
-	const args = getPathArgs(op.path);
-	const hasId = args.length > 0;
+	const hasId = getPathArgs(op.path).length > 0;
 
 	if (method === "GET" && !hasId) return "list";
 	if (method === "POST" && !hasId) return "create";
@@ -267,22 +240,24 @@ function inferRpcAction(op: NormalizedOperation): string {
 	const segments = getPathSegments(op.path);
 	const last = segments[segments.length - 1] ?? "";
 	if (last.includes(".")) {
-		const part = last.split(".").pop() ?? last;
-		return canonicalizeAction(part);
+		return canonicalizeAction(last.slice(last.lastIndexOf(".") + 1));
 	}
 
 	return kebabCase(op.method);
 }
 
 export function planOperation(op: NormalizedOperation): PlannedOperation {
-	const style = inferStyle(op);
+	const style =
+		op.path.includes(".") ||
+		(op.operationId?.includes(".") && op.method === "POST")
+			? "rpc"
+			: "rest";
 	const resource = inferResource(op);
 	const action = style === "rpc" ? inferRpcAction(op) : inferRestAction(op);
 	const rawPathArgs = getPathArgs(op.path);
 
 	return {
 		...op,
-		key: op.key,
 		style,
 		resource,
 		action,
@@ -292,10 +267,11 @@ export function planOperation(op: NormalizedOperation): PlannedOperation {
 	};
 }
 
-export function planOperations(ops: NormalizedOperation[]): PlannedOperation[] {
-	const planned = ops.map(planOperation);
-
-	// Stable collision handling: if resource+action repeats, add a suffix.
+function applyLegacyCollisionHandling(
+	planned: PlannedOperation[],
+): LegacyPlannedOperation[] {
+	// Keep this pass in encounter order. Existing numeric suffixes are part of the
+	// public CLI and intentionally retain the original planner's assignments.
 	const counts = new Map<string, number>();
 	for (const op of planned) {
 		const key = `${op.resource}:${op.action}`;
@@ -305,18 +281,145 @@ export function planOperations(ops: NormalizedOperation[]): PlannedOperation[] {
 	const seen = new Map<string, number>();
 	return planned.map((op) => {
 		const key = `${op.resource}:${op.action}`;
-		const total = counts.get(key) ?? 0;
-		if (total <= 1) return op;
+		if (counts.get(key) === 1) return { op, source: "uncontested" };
 
 		const idx = (seen.get(key) ?? 0) + 1;
 		seen.set(key, idx);
 
-		const disambiguatedAction = deriveDisambiguatedAction(op, idx);
+		const candidate = deriveLegacyCandidate(op, idx);
 
 		return {
-			...op,
-			action: disambiguatedAction,
-			aliasOf: `${op.resource} ${op.canonicalAction}`,
+			op: {
+				...op,
+				action: candidate.action,
+				aliasOf: `${op.resource} ${op.canonicalAction}`,
+			},
+			source: candidate.source,
 		};
 	});
+}
+
+function repairFinalCollisions(
+	legacy: LegacyPlannedOperation[],
+): PlannedOperation[] {
+	type RepairOperation = LegacyPlannedOperation & { lastReadable: string };
+	const operations: RepairOperation[] = legacy.map((claim) => ({
+		...claim,
+		lastReadable: claim.op.action,
+	}));
+	const groups = new Map<string, RepairOperation[]>();
+
+	for (const claim of operations) {
+		const { op } = claim;
+		const key = `${op.resource}\0${op.action}`;
+		const group = groups.get(key) ?? [];
+		group.push(claim);
+		groups.set(key, group);
+	}
+
+	const owned = new Set<string>();
+	const blocked = new Set<string>();
+	const pending = new Set<RepairOperation>();
+
+	for (const [key, group] of groups) {
+		if (group.length === 1) {
+			owned.add(key);
+			continue;
+		}
+
+		let strongest = -1;
+		for (const { source } of group) {
+			strongest = Math.max(strongest, LEGACY_SOURCE_STRENGTH[source]);
+		}
+		const winners = group.filter(
+			({ source }) => LEGACY_SOURCE_STRENGTH[source] === strongest,
+		);
+		const winner = winners.length === 1 ? winners[0] : undefined;
+		(winner ? owned : blocked).add(key);
+		for (const claim of group) {
+			if (claim === winner) continue;
+			pending.add(claim);
+		}
+	}
+
+	const runReadableStage = (
+		derive: (op: PlannedOperation, last: string) => string | undefined,
+	): void => {
+		const proposals = new Map<string, RepairOperation[]>();
+
+		for (const unresolved of pending) {
+			const action = derive(unresolved.op, unresolved.lastReadable);
+			if (!action) continue;
+
+			// The next stage extends this candidate even if this stage cannot award it.
+			unresolved.lastReadable = action;
+			const key = `${unresolved.op.resource}\0${action}`;
+			const claimants = proposals.get(key) ?? [];
+			claimants.push(unresolved);
+			proposals.set(key, claimants);
+		}
+
+		// Arbitrate the whole stage, never by encounter order.
+		for (const [key, claimants] of proposals) {
+			if (owned.has(key) || blocked.has(key)) continue;
+			if (claimants.length > 1) {
+				blocked.add(key);
+				continue;
+			}
+
+			// biome-ignore lint/style/noNonNullAssertion: a proposal group is never empty
+			const unresolved = claimants[0]!;
+			const { op, lastReadable: action } = unresolved;
+
+			unresolved.op = { ...op, action };
+			owned.add(key);
+			pending.delete(unresolved);
+		}
+	};
+
+	runReadableStage((op) => kebabCase(op.operationId ?? ""));
+	runReadableStage((op, lastReadable) => {
+		const selected = getPathSegments(op.path).findLast(
+			(segment) => !segment.includes("{") && !segment.includes("}"),
+		);
+		if (!selected) return undefined;
+
+		const qualifier = kebabCase(selected);
+		const singularResource = op.resource.replace(/s$/, "");
+		if (
+			!qualifier ||
+			qualifier === op.resource ||
+			qualifier === singularResource ||
+			`-${lastReadable}-`.includes(`-${qualifier}-`)
+		) {
+			return undefined;
+		}
+		return `${lastReadable}-${qualifier}`;
+	});
+
+	for (const unresolved of pending) {
+		const { op, lastReadable } = unresolved;
+		const pathHex = op.path
+			.split("")
+			.map((unit) => unit.charCodeAt(0).toString(16).padStart(4, "0"))
+			.join("");
+		const action = `${lastReadable}--specli-route-v1-${op.method.toLowerCase()}-${pathHex}`;
+		const key = `${op.resource}\0${action}`;
+		if (owned.has(key)) {
+			throw new Error(
+				`Cannot generate a unique command for request: ${op.method.toUpperCase()} ${op.path}`,
+			);
+		}
+
+		unresolved.op = { ...op, action };
+		owned.add(key);
+	}
+
+	return operations.map(({ op }) => op);
+}
+
+export function planOperations(ops: NormalizedOperation[]): PlannedOperation[] {
+	const planned = ops.map(planOperation);
+	const legacy = applyLegacyCollisionHandling(planned);
+	return repairFinalCollisions(legacy);
 }
