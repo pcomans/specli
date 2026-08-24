@@ -143,8 +143,8 @@ describe("planOperations collision handling", () => {
 
 		const planned = planOperations(ops);
 		// Should extract meaningful disambiguators from operationId and path
-		// First one has no extra info, falls back to numeric suffix
-		expect(planned[0]?.action).toBe("get-1");
+		// First one has no extra info, so it keeps the available short action
+		expect(planned[0]?.action).toBe("get");
 		// Second extracts "events" from operationId
 		expect(planned[1]?.action).toBe("get-events");
 		// Third extracts "files" from operationId (list -> get canonicalization doesn't affect disambiguator)
@@ -197,7 +197,7 @@ describe("planOperations collision handling", () => {
 		];
 
 		const planned = planOperations(ops);
-		expect(planned[0]?.action).toBe("get-1");
+		expect(planned[0]?.action).toBe("get");
 		expect(planned[1]?.action).toBe("get-profile");
 	});
 });

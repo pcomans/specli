@@ -138,7 +138,7 @@ function extractDisambiguator(
 }
 
 const LEGACY_SOURCE_STRENGTH = {
-	numeric: 0,
+	"base-fallback": 0,
 	"path-derived": 1,
 	"operation-id-derived": 2,
 	uncontested: 3,
@@ -151,11 +151,11 @@ type LegacyPlannedOperation = {
 	source: LegacyNameSource;
 };
 
-/** Reproduces the legacy candidate and provenance for a primary collision. */
-function deriveLegacyCandidate(
-	op: PlannedOperation,
-	idx: number,
-): { action: string; source: LegacyNameSource } {
+/** Derives the first candidate and its collision-repair priority. */
+function deriveLegacyCandidate(op: PlannedOperation): {
+	action: string;
+	source: LegacyNameSource;
+} {
 	if (op.operationId) {
 		const disambiguator = extractDisambiguator(
 			op.operationId,
@@ -187,8 +187,8 @@ function deriveLegacyCandidate(
 		}
 	}
 
-	// Last resort: append numeric suffix
-	return { action: `${op.action}-${idx}`, source: "numeric" };
+	// Equal fallback claims advance together through the repair stages below.
+	return { action: op.action, source: "base-fallback" };
 }
 
 function canonicalizeAction(action: string): string {
@@ -270,23 +270,17 @@ export function planOperation(op: NormalizedOperation): PlannedOperation {
 function applyLegacyCollisionHandling(
 	planned: PlannedOperation[],
 ): LegacyPlannedOperation[] {
-	// Keep this pass in encounter order. Existing numeric suffixes are part of the
-	// public CLI and intentionally retain the original planner's assignments.
 	const counts = new Map<string, number>();
 	for (const op of planned) {
 		const key = `${op.resource}:${op.action}`;
 		counts.set(key, (counts.get(key) ?? 0) + 1);
 	}
 
-	const seen = new Map<string, number>();
 	return planned.map((op) => {
 		const key = `${op.resource}:${op.action}`;
 		if (counts.get(key) === 1) return { op, source: "uncontested" };
 
-		const idx = (seen.get(key) ?? 0) + 1;
-		seen.set(key, idx);
-
-		const candidate = deriveLegacyCandidate(op, idx);
+		const candidate = deriveLegacyCandidate(op);
 
 		return {
 			op: {
