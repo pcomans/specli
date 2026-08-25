@@ -11,6 +11,7 @@ export type PlannedOperation = NormalizedOperation & {
 	rawPathArgs: string[];
 	style: "rest" | "rpc";
 	canonicalAction: string;
+	/** Original command name before collision disambiguation. */
 	aliasOf?: string;
 };
 
@@ -176,11 +177,8 @@ function extractDisambiguator(
 	return name;
 }
 
-/**
- * Derives a disambiguated action name for colliding operations.
- * Tries to create meaningful names like "get-events" instead of "get-get-deployment-events-1".
- */
-function deriveDisambiguatedAction(op: PlannedOperation, idx: number): string {
+/** Derive a meaningful action name without adding a numeric suffix. */
+function deriveSemanticAction(op: PlannedOperation): string | undefined {
 	if (op.operationId) {
 		const disambiguator = extractDisambiguator(
 			op.operationId,
@@ -206,8 +204,105 @@ function deriveDisambiguatedAction(op: PlannedOperation, idx: number): string {
 		}
 	}
 
-	// Last resort: append numeric suffix
-	return `${op.action}-${idx}`;
+	return undefined;
+}
+
+function deriveOperationIdAction(op: PlannedOperation): string | undefined {
+	return op.operationId ? kebabCase(op.operationId) : undefined;
+}
+
+function derivePathIdentityAction(op: PlannedOperation): string | undefined {
+	const re = /\{[^}]+\}/g;
+	const path = kebabCase(op.path.replace(re, ""));
+	return path ? `${op.action}-${path}` : undefined;
+}
+
+type ActionDeriver = (operation: PlannedOperation) => string | undefined;
+
+const MEANINGFUL_ACTION_DERIVERS: ActionDeriver[] = [
+	deriveSemanticAction,
+	deriveOperationIdAction,
+	derivePathIdentityAction,
+];
+
+function buildCommandKey(resource: string, action: string): string {
+	return `${resource}:${action}`;
+}
+
+/**
+ * Assign the best available meaningful action to every colliding operation.
+ *
+ * Try a short action derived from the operation ID or path first, then the full
+ * operation ID, then the full request path. For each derivation, calculate all
+ * unassigned commands before assigning any. Use a command only when exactly one
+ * operation derives it and it is not already in use.
+ */
+function assignMeaningfulActions(
+	operations: PlannedOperation[],
+	claimedCommands: Set<string>,
+): Map<PlannedOperation, string> {
+	const assignedActions = new Map<PlannedOperation, string>();
+
+	while (true) {
+		let assignedInPass = false;
+
+		for (const deriveAction of MEANINGFUL_ACTION_DERIVERS) {
+			const candidateCommandCounts = new Map<string, number>();
+
+			// Count first so a name shared by multiple operations is not assigned to
+			// whichever operation happens to appear first.
+			for (const operation of operations) {
+				if (assignedActions.has(operation)) continue;
+				const action = deriveAction(operation);
+				if (!action) continue;
+				const commandKey = buildCommandKey(operation.resource, action);
+				candidateCommandCounts.set(
+					commandKey,
+					(candidateCommandCounts.get(commandKey) ?? 0) + 1,
+				);
+			}
+
+			for (const operation of operations) {
+				if (assignedActions.has(operation)) continue;
+				const action = deriveAction(operation);
+				if (!action) continue;
+				const commandKey = buildCommandKey(operation.resource, action);
+				const isUniqueAndAvailable =
+					candidateCommandCounts.get(commandKey) === 1 &&
+					!claimedCommands.has(commandKey);
+				if (!isUniqueAndAvailable) continue;
+
+				assignedActions.set(operation, action);
+				claimedCommands.add(commandKey);
+				assignedInPass = true;
+			}
+
+			// Assignments can make an earlier shared name unique for a remaining
+			// operation, so reconsider the derivations from the beginning.
+			if (assignedInPass) break;
+		}
+
+		if (!assignedInPass) break;
+	}
+
+	return assignedActions;
+}
+
+function findAvailableFallbackAction(
+	operation: PlannedOperation,
+	claimedCommands: ReadonlySet<string>,
+): string {
+	const isClaimed = (action: string) =>
+		claimedCommands.has(buildCommandKey(operation.resource, action));
+	const semanticAction = deriveSemanticAction(operation);
+	const baseAction = semanticAction ?? operation.action;
+	let action = semanticAction ?? `${baseAction}-1`;
+	let suffix = 2;
+	while (isClaimed(action)) {
+		action = `${baseAction}-${suffix}`;
+		suffix++;
+	}
+	return action;
 }
 
 function canonicalizeAction(action: string): string {
@@ -295,27 +390,48 @@ export function planOperation(op: NormalizedOperation): PlannedOperation {
 export function planOperations(ops: NormalizedOperation[]): PlannedOperation[] {
 	const planned = ops.map(planOperation);
 
-	// Stable collision handling: if resource+action repeats, add a suffix.
-	const counts = new Map<string, number>();
+	// Count initial commands so only colliding operations are reallocated.
+	const commandCounts = new Map<string, number>();
 	for (const op of planned) {
-		const key = `${op.resource}:${op.action}`;
-		counts.set(key, (counts.get(key) ?? 0) + 1);
+		const commandKey = buildCommandKey(op.resource, op.action);
+		commandCounts.set(commandKey, (commandCounts.get(commandKey) ?? 0) + 1);
 	}
 
-	const seen = new Map<string, number>();
+	// Reserve non-colliding commands so fallback names cannot replace them.
+	const claimedCommands = new Set<string>();
+	for (const [commandKey, count] of commandCounts) {
+		if (count === 1) claimedCommands.add(commandKey);
+	}
+
+	const collidingOperations: PlannedOperation[] = [];
+	for (const op of planned) {
+		const commandKey = buildCommandKey(op.resource, op.action);
+		if (commandCounts.get(commandKey) === 1) continue;
+		collidingOperations.push(op);
+	}
+
+	const assignedActions = assignMeaningfulActions(
+		collidingOperations,
+		claimedCommands,
+	);
+
+	for (const operation of collidingOperations) {
+		if (assignedActions.has(operation)) continue;
+
+		// When no meaningful option distinguishes operations, input order decides
+		// which operation receives each numeric fallback.
+		const action = findAvailableFallbackAction(operation, claimedCommands);
+		const commandKey = buildCommandKey(operation.resource, action);
+		assignedActions.set(operation, action);
+		claimedCommands.add(commandKey);
+	}
+
 	return planned.map((op) => {
-		const key = `${op.resource}:${op.action}`;
-		const total = counts.get(key) ?? 0;
-		if (total <= 1) return op;
-
-		const idx = (seen.get(key) ?? 0) + 1;
-		seen.set(key, idx);
-
-		const disambiguatedAction = deriveDisambiguatedAction(op, idx);
-
+		const action = assignedActions.get(op);
+		if (!action || action === op.canonicalAction) return op;
 		return {
 			...op,
-			action: disambiguatedAction,
+			action,
 			aliasOf: `${op.resource} ${op.canonicalAction}`,
 		};
 	});

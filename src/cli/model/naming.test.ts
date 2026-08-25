@@ -86,6 +86,122 @@ describe("planOperation", () => {
 });
 
 describe("planOperations collision handling", () => {
+	function operation(
+		path: string,
+		operationId: string | undefined,
+		tag: string,
+		method = "GET",
+	): NormalizedOperation {
+		return {
+			key: `${method} ${path}`,
+			method,
+			path,
+			operationId,
+			tags: [tag],
+			parameters: [],
+		};
+	}
+
+	function priorityOperation(
+		path: string,
+		operationId: string,
+	): NormalizedOperation {
+		return operation(path, operationId, "Issue priorities");
+	}
+
+	const jiraPriorities: NormalizedOperation[] = [
+		priorityOperation("/priority", "getPriorities"),
+		priorityOperation("/priority/search", "searchPriorities"),
+	];
+
+	test("uses full operation IDs when derived names still collide", () => {
+		const actions = planOperations(jiraPriorities).map((op) => op.action);
+		expect(actions).toEqual(["get-priorities", "search-priorities"]);
+	});
+
+	test("preserves an existing command while allocating derived names", () => {
+		const ops: NormalizedOperation[] = [
+			...jiraPriorities,
+			operation(
+				"/Priority.ListPriorities",
+				"Priority.listPriorities",
+				"Issue priorities",
+				"POST",
+			),
+		];
+
+		const actions = planOperations(ops).map((op) => op.action);
+		expect(actions).toEqual([
+			"get-priorities",
+			"search-priorities",
+			"list-priorities",
+		]);
+	});
+
+	test("uses paths when operation IDs cannot distinguish a collision", () => {
+		const ops: NormalizedOperation[] = [
+			priorityOperation("/priority/active", "getPriorities"),
+			priorityOperation("/priority/archived", "getPriorities"),
+		];
+
+		const actions = planOperations(ops).map((op) => op.action);
+		expect(actions).toEqual(["list-priority-active", "list-priority-archived"]);
+	});
+
+	test("uses a numeric suffix only without semantic distinction", () => {
+		const ops: NormalizedOperation[] = [
+			priorityOperation("/priority/{id}", "getPriorities"),
+			priorityOperation("/priority/{key}", "getPriorities"),
+		];
+
+		const actions = planOperations(ops).map((op) => op.action);
+		expect(actions).toEqual(["get-priorities", "get-priorities-2"]);
+	});
+
+	test("numeric fallbacks skip commands that are already in use", () => {
+		const ops: NormalizedOperation[] = [
+			operation("/users/{id}", undefined, "users"),
+			operation("/users/{key}", undefined, "users"),
+			operation("/Users.Get-1", "Users.Get-1", "users", "POST"),
+		];
+
+		const actions = planOperations(ops).map((op) => op.action);
+		expect(actions).toEqual(["get-2", "get-3", "get-1"]);
+	});
+
+	test("does not mark a reclaimed canonical command as an alias", () => {
+		const ops: NormalizedOperation[] = [
+			operation("/users/{id}", "get", "users"),
+			operation("/users/{id}/profile", "getProfile", "users"),
+		];
+
+		const planned = planOperations(ops);
+		expect(planned[0]?.action).toBe("get");
+		expect(planned[0]?.aliasOf).toBeUndefined();
+		expect(planned[1]?.action).toBe("get-profile");
+		expect(planned[1]?.aliasOf).toBe("users get");
+	});
+
+	test("reconsiders preferred names after assigning another operation", () => {
+		const ops: NormalizedOperation[] = [
+			operation("/users/{id}/profile-a", "getUserProfile", "users"),
+			operation("/users/{id}/profile-b", "retrieveProfile", "users"),
+			operation(
+				"/Users.Retrieve-Profile",
+				"Users.Retrieve-Profile",
+				"users",
+				"POST",
+			),
+		];
+
+		const actions = planOperations(ops).map((op) => op.action);
+		expect(actions).toEqual([
+			"get-user-profile",
+			"get-profile",
+			"retrieve-profile",
+		]);
+	});
+
 	test("disambiguates colliding creates with meaningful names", () => {
 		const ops: NormalizedOperation[] = [
 			{
@@ -113,7 +229,7 @@ describe("planOperations collision handling", () => {
 		expect(planned[1]?.action).toBe("create-upload-files");
 	});
 
-	test("disambiguates colliding gets with meaningful names from operationId", () => {
+	test("uses meaningful operation IDs before numeric suffixes", () => {
 		const ops: NormalizedOperation[] = [
 			{
 				key: "GET /deployments/{idOrUrl}",
@@ -142,9 +258,8 @@ describe("planOperations collision handling", () => {
 		];
 
 		const planned = planOperations(ops);
-		// Should extract meaningful disambiguators from operationId and path
-		// First one has no extra info, falls back to numeric suffix
-		expect(planned[0]?.action).toBe("get-1");
+		// The full operation ID is preferable when no shorter name can be derived.
+		expect(planned[0]?.action).toBe("get-deployment");
 		// Second extracts "events" from operationId
 		expect(planned[1]?.action).toBe("get-events");
 		// Third extracts "files" from operationId (list -> get canonicalization doesn't affect disambiguator)
@@ -176,7 +291,19 @@ describe("planOperations collision handling", () => {
 		expect(planned[1]?.action).toBe("create");
 	});
 
-	test("falls back to path segment when operationId has no extra info", () => {
+	test("the same action on different resources is not a collision", () => {
+		const planned = planOperations([
+			operation("/users", "listUsers", "users"),
+			operation("/projects", "listProjects", "projects"),
+		]);
+
+		expect(planned.map(({ resource, action }) => [resource, action])).toEqual([
+			["users", "list"],
+			["projects", "list"],
+		]);
+	});
+
+	test("uses operation IDs and paths before numeric suffixes", () => {
 		const ops: NormalizedOperation[] = [
 			{
 				key: "GET /users/{id}",
@@ -197,7 +324,7 @@ describe("planOperations collision handling", () => {
 		];
 
 		const planned = planOperations(ops);
-		expect(planned[0]?.action).toBe("get-1");
+		expect(planned[0]?.action).toBe("get-user");
 		expect(planned[1]?.action).toBe("get-profile");
 	});
 });
